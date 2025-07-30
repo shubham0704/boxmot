@@ -189,19 +189,34 @@ class KalmanFilterXYSR(object):
             indices = np.where(np.array(occur) == 0)[0]
             index1, index2 = indices[-2], indices[-1]
             box1, box2 = new_history[index1], new_history[index2]
-            x1, y1, s1, r1 = box1
+            
+            # Handle both 4 and 5 value formats from convert_bbox_to_z
+            if len(box1) == 5:
+                x1, y1, s1, _, r1 = box1  # Format: [x, y, s, score, r]
+            else:
+                x1, y1, s1, r1 = box1  # Format: [x, y, s, r]
+                
+            if len(box2) == 5:
+                x2, y2, s2, _, r2 = box2  # Format: [x, y, s, score, r]
+            else:
+                x2, y2, s2, r2 = box2  # Format: [x, y, s, r]
+            
             w1, h1 = np.sqrt(s1 * r1), np.sqrt(s1 / r1)
-            x2, y2, s2, r2 = box2
             w2, h2 = np.sqrt(s2 * r2), np.sqrt(s2 / r2)
             time_gap = index2 - index1
             dx, dy = (x2 - x1) / time_gap, (y2 - y1) / time_gap
             dw, dh = (w2 - w1) / time_gap, (h2 - h1) / time_gap
 
             for i in range(index2 - index1):
-                x, y = x1 + (i + 1) * dx, y1 + (i + 1) * dy
-                w, h = w1 + (i + 1) * dw, h1 + (i + 1) * dh
-                s, r = w * h, w / float(h)
-                new_box = np.array([x, y, s, r]).reshape((4, 1))
+                x = float(x1 + (i + 1) * dx)
+                y = float(y1 + (i + 1) * dy)
+                w = float(w1 + (i + 1) * dw)
+                h = float(h1 + (i + 1) * dh)
+                s = float(w * h)
+                r = float(w / h)
+                # Create 5-element array for update (x, y, s, score, r)
+                # Use a dummy score of 0 for interpolated boxes
+                new_box = np.array([x, y, s, 0.0, r], dtype=np.float32).reshape((5, 1))
                 self.update(new_box)
                 if not i == (index2 - index1 - 1):
                     self.predict()

@@ -623,7 +623,8 @@ def associate_4_points_with_score_with_reid(
             if (emb_cost[m[0], m[1]] > longterm_reid_correction_thresh) and (
                 iou_matrix_thre[m[0], m[1]] < iou_threshold
             ):
-                print("correction:", emb_cost[m[0], m[1]])
+                # Debug: ReID correction applied
+                # print("correction:", emb_cost[m[0], m[1]])
                 unmatched_detections.append(m[0])
                 unmatched_trackers.append(m[1])
             else:

@@ -88,6 +88,6 @@ def create_tracker(
 
     # Return the instantiated tracker class with arguments and warmed-up models
     tracker = tracker_class(**tracker_args)
-    if hasattr(tracker, "model"):
+    if hasattr(tracker, "model") and tracker.model is not None:
         tracker.model.warmup()
     return tracker

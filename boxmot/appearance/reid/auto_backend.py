@@ -31,6 +31,17 @@ class ReidAutoBackend:
             half (bool): Whether to use half precision for model inference.
         """
         super().__init__()
+
+        # Handle None weights (used when backend will be replaced, e.g., with Triton)
+        if weights is None:
+            LOGGER.info("ReidAutoBackend initialized with None weights (will be replaced by custom backend)")
+            self.pt = self.jit = self.onnx = self.xml = self.engine = self.tflite = False
+            self.weights = None
+            self.device = select_device(device)
+            self.half = half
+            self.model = None  # Placeholder, will be replaced
+            return
+
         w = weights[0] if isinstance(weights, list) else weights
         (
             self.pt,

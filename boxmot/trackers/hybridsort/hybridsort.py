@@ -205,34 +205,62 @@ class KalmanBoxTracker(object):
 
         # add the following values and functions
         self.smooth_feat = None
+        self.embedding_concentration = 0.0
+        self._ema_r_vec = None
+        self._ema_weight_sum = 0.0
         buffer_size = longterm_bank_length
         self.features = deque([], maxlen=buffer_size)
+
+        # momentum of embedding update (must be set before update_features)
+        self.alpha = alpha
         self.update_features(temp_feat)
 
-        # momentum of embedding update
-        self.alpha = alpha
-
     # ReID. for update embeddings during tracking
+    def _slerp(self, prev_vec, new_vec, alpha):
+        """Spherical linear interpolation keeping vectors on the hypersphere."""
+        alpha = float(np.clip(alpha, 0.0, 1.0))
+        dot = float(np.clip(np.dot(prev_vec, new_vec), -1.0, 1.0))
+        if dot > 0.9995 or dot < -0.9995:
+            # Nearly identical or opposite; fall back to linear blend and renorm
+            blended = (1.0 - alpha) * prev_vec + alpha * new_vec
+            norm = np.linalg.norm(blended)
+            return blended / max(norm, 1e-12)
+        theta = np.arccos(dot)
+        sin_theta = np.sin(theta)
+        coeff_prev = np.sin((1.0 - alpha) * theta) / sin_theta
+        coeff_new = np.sin(alpha * theta) / sin_theta
+        return coeff_prev * prev_vec + coeff_new * new_vec
+
+    def _update_concentration(self, feat, quality, beta):
+        weight = float(np.clip(quality, 1e-3, 1.0))
+        if self._ema_r_vec is None:
+            self._ema_r_vec = weight * feat
+            self._ema_weight_sum = weight
+        else:
+            self._ema_r_vec = beta * self._ema_r_vec + (1.0 - beta) * weight * feat
+            self._ema_weight_sum = beta * self._ema_weight_sum + (1.0 - beta) * weight
+        denom = max(self._ema_weight_sum, 1e-6)
+        self.embedding_concentration = float(np.clip(np.linalg.norm(self._ema_r_vec) / denom, 0.0, 1.0))
+
     def update_features(self, feat, score=-1):
         feat /= np.linalg.norm(feat)
         self.curr_feat = feat
+        beta = float(np.clip(self.alpha, 1e-6, 0.999999))
+        if score > 0:
+            quality = float(np.clip(score, 1e-3, 1.0))
+        elif getattr(self, "confidence", None) is not None:
+            quality = float(np.clip(self.confidence, 1e-3, 1.0))
+        else:
+            quality = 1.0
+        # Map EMA decay + quality to a geodesic interpolation step
+        ema_step = 1.0 - np.power(beta, quality)
         if self.smooth_feat is None:
             self.smooth_feat = feat
         else:
-            if self.adapfs:
-                assert score > 0
-                pre_w = self.alpha * (self.confidence / (self.confidence + score))
-                cur_w = (1 - self.alpha) * (score / (self.confidence + score))
-                sum_w = pre_w + cur_w
-                pre_w = pre_w / sum_w
-                cur_w = cur_w / sum_w
-                self.smooth_feat = pre_w * self.smooth_feat + cur_w * feat
-            else:
-                self.smooth_feat = (
-                    self.alpha * self.smooth_feat + (1 - self.alpha) * feat
-                )
+            self.smooth_feat = self._slerp(self.smooth_feat, feat, ema_step)
+            self.smooth_feat /= max(np.linalg.norm(self.smooth_feat), 1e-12)
+        self._update_concentration(feat, quality, beta)
         self.features.append(feat)
-        self.smooth_feat /= np.linalg.norm(self.smooth_feat)
 
     def camera_update(self, warp_matrix):
         """
